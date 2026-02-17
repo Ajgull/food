@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+
+{% block title %}Dishes{% endblock %}
+
+{% block content %}
+    <div class="col-md-9">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex gap-2 align-items-center">
+                {% if user.is_authenticated %}
+
+                    {% if request.user.profile.role == 'restaurant' %}
+                        <a href="{% url 'dish_create' %}" class="btn btn-outline-primary">Create dish</a>
+
+                    {% elif request.user.profile.role == 'customer' or request.user.profile.role == 'courier' %}
+                        <h2 class="h5 mb-0">Hi, customer {{ request.user.username }}</h2>
+                        <a href="{% url 'order_list' %}" class="btn btn-outline-primary"> History of orders</a>
+
+
+                    {% elif request.user.profile.role == 'courier' %}
+                        <h2 class="h5 mb-0">Hi, courier {{ request.user.username }}</h2>
+                    {% endif %}
+                        
+                    <form method="post" action="{% url 'logout' %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-primary btn-sm">Log out</button>
+                    </form>
+                {% else %}
+                        <a href="{% url 'register' %}" class="btn btn-primary">Create an Account</a>
+                        <a href="{% url 'login' %}" class="btn btn-outline-primary">Log in</a>
+                {% endif %}
+            </div>
+            <div class="bg-light border rounded p-3" style="width: 300px;">
+                <h5 class="mb-3">Cart ({{ cart_total_items|default:0 }} items)</h5>
+                {% if cart_dishes %}
+                    <ul class="list-unstyled mb-3" style="max-height: 200px; overflow-y: auto;">
+                        {% for item in cart_dishes %}
+                            <li class="mb-2">
+                                <strong>{{ item.dish.name }}</strong> x{{ item.quantity }}<br>
+                                <small class="text-muted">{{ item.subtotal|floatformat:2 }} ₽</small>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                    <hr>
+                {% endif %}
+                <p class="mb-0"><strong>Total: {{ cart_total_price|floatformat:2 }} ₽</strong></p>
+
+                <form method="post" action="{% url 'order' %}" id="order-form">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-outline-primary">Create order</button>
+                </form>
+
+
+                <script>
+                document.getElementById('order-btn').addEventListener('click', function() {
+                    const isAuthenticated = {{ user.is_authenticated|yesno:"true,false" }};
+                    const userRole = "{{ request.user.profile.role|default:'' }}";
+
+                    if (!isAuthenticated || userRole !== 'customer') {
+                        alert('Please, log in to create order');
+                        return;
+                    }
+
+                    window.location.href = "{% url 'order_countdown' %}";
+                });
+
+                </script>
+            </div>
+        </div>
+
+        <h1 class="mb-4">Dishes</h1>
+        <div class="row row-cols-1 row-cols-md-2 g-4">
+            {% for dish in dishes %}
+                <div class="col">
+                    <div class="dish-card h-100 d-flex flex-column">
+                        <img src="{{ dish.image.url }}" alt="{{ dish.name }}" class="mb-3">
+                        <h5 class="card-title">{{ dish.name }}</h5>
+                        <p class="mb-2"><strong>Price:</strong> {{ dish.price }}</p>
+                        <div class="mt-auto d-flex gap-2 flex-wrap">
+                            <a href="{% url 'dish_detail' dish.pk %}" class="btn btn-outline-primary btn-sm flex-fill">More info</a>
+                            
+                            <form method="post" action="{% url 'add_to_cart' dish.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-outline-success btn-sm flex-fill">Add to cart</button>
+                            </form>
+                            <form method="post" action="{% url 'remove_from_cart' dish.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-outline-danger btn-sm flex-fill">Remove from cart</button>
+                            </form>
+                        </div>
+                        <div class="mt-3">
+                            <p class="mb-1">Likes: {{ dish.likes.count }}</p>
+                            <p class="mb-0">Comments: {{ dish.comments.count }}</p>
+                        </div>
+                    </div>
+                </div>
+            {% empty %}
+                <p>No dishes available.</p>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div id="support-chat" style="
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 320px;
+    height: 240px;
+    border: 1px solid #ccc;
+    background: white;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    padding: 10px;
+    z-index: 1050;
+    display: flex;
+    flex-direction: column;
+    font-family: Arial, sans-serif;
+">
+    <h5 style="margin-top: 0; margin-bottom: 10px;">Support</h5>
+    <div id="chat-log" style="flex-grow: 1; overflow-y: auto; border:1px solid #ddd; padding: 5px; font-size: 14px; margin-bottom: 10px;"></div>
+    <div style="display: flex; gap: 5px;">
+        <input id="chat-message-input" type="text" style="flex-grow: 1; padding: 5px;" placeholder="Type message...">
+        <button id="chat-message-send" class="btn btn-primary" style="flex-shrink: 0;">Send</button>
+    </div>
+</div>
+
+<script>
+    const chatSocket = new WebSocket('ws://' + window.location.host + '/ws/support/');
+
+    chatSocket.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        const chatLog = document.getElementById('chat-log');
+        chatLog.innerHTML += '<div><b>Support:</b> ' + data.message + '</div>';
+        chatLog.scrollTop = chatLog.scrollHeight;
+    };
+
+    chatSocket.onclose = function(e) {
+        console.error('WebSocket закрыт');
+        const chatLog = document.getElementById('chat-log');
+        chatLog.innerHTML += '<div style="color: red;"><em>Связь с техподдержкой потеряна.</em></div>';
+    };
+
+    document.getElementById('chat-message-send').onclick = function() {
+        const input = document.getElementById('chat-message-input');
+        if (input.value.trim() !== '') {
+            chatSocket.send(JSON.stringify({'message': input.value}));
+            const chatLog = document.getElementById('chat-log');
+            chatLog.innerHTML += '<div><b>You:</b> ' + input.value + '</div>';
+            chatLog.scrollTop = chatLog.scrollHeight;
+            input.value = '';
+            input.focus();
+        }
+    };
+
+    document.getElementById('chat-message-input').addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            document.getElementById('chat-message-send').click();
+        }
+    });
+</script>
+
+{% endblock %}
